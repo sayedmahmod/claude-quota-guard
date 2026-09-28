@@ -1,0 +1,13 @@
+{
+  "name": "quota-guard",
+  "version": "1.0.0",
+  "description": "Lets Claude read its own 5-hour and 7-day usage limits while coding, wrap up before the limit, and resume in the next window.",
+  "author": {
+    "name": "sayedmahmod",
+    "url": "https://github.com/sayedmahmod"
+  },
+  "homepage": "https://github.com/sayedmahmod/claude-quota-guard",
+  "repository": "https://github.com/sayedmahmod/claude-quota-guard",
+  "license": "MIT",
+  "keywords": ["quota", "usage", "rate-limit", "claude-code", "skill", "handoff"]
+}

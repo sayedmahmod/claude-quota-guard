@@ -1,0 +1,17 @@
+{
+  "$schema": "https://www.schemastore.org/claude-code-marketplace.json",
+  "name": "quota-guard",
+  "description": "Quota-aware working for Claude Code: read the 5h and 7d limits, hand off before the limit, resume after the reset.",
+  "owner": {
+    "name": "sayedmahmod",
+    "url": "https://github.com/sayedmahmod"
+  },
+  "plugins": [
+    {
+      "name": "quota-guard",
+      "description": "Read the 5h and 7d usage limits while coding, wrap up before the limit, resume in the next window.",
+      "source": "./",
+      "category": "productivity"
+    }
+  ]
+}

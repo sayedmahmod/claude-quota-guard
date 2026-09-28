@@ -1,0 +1,106 @@
+#!/usr/bin/env python3
+"""cc-quota: read Claude Code's 5-hour and 7-day usage limits.
+
+Modes:
+  cc-quota            Print the last cached snapshot.
+  cc-quota --capture  Read Claude Code status line JSON from stdin, cache it, print it.
+                      Use this as the "statusLine" command in ~/.claude/settings.json.
+  cc-quota --probe    Send one tiny Haiku request, read the rate_limit_event, cache it.
+                      Works in headless sessions where no status line runs.
+
+The cache lives in $CC_QUOTA_CACHE_DIR/usage.json (default ~/.cache/cc-quota).
+"""
+import datetime as dt
+import json
+import os
+import pathlib
+import subprocess
+import sys
+import tempfile
+
+CACHE_DIR = pathlib.Path(os.environ.get("CC_QUOTA_CACHE_DIR", pathlib.Path.home() / ".cache" / "cc-quota"))
+CACHE = CACHE_DIR / "usage.json"
+STALE_SECONDS = 900
+
+
+def show(label, item):
+    if not isinstance(item, dict) or item.get("used_percentage") is None:
+        return f"{label}: not available"
+    used = float(item["used_percentage"])
+    reset = item.get("resets_at")
+    reset_text = (
+        dt.datetime.fromtimestamp(float(reset)).astimezone().strftime("%Y-%m-%d %H:%M")
+        if reset else "unknown"
+    )
+    return f"{label}: {used:.0f}% used, {100 - used:.0f}% free; resets {reset_text}"
+
+
+def report(snapshot):
+    print(show("5h", snapshot.get("five_hour")))
+    print(show("7d", snapshot.get("seven_day")))
+    observed = snapshot.get("observed_at")
+    if observed:
+        age = (dt.datetime.now(dt.timezone.utc) - dt.datetime.fromisoformat(observed)).total_seconds()
+        print(f"Observed: {max(0, int(age // 60))} min ago")
+        if age > STALE_SECONDS:
+            print("Note: snapshot is older than 15 minutes.")
+
+
+def probe():
+    out = subprocess.run(
+        ["claude", "-p", "reply only: ok", "--model", "haiku",
+         "--output-format", "stream-json", "--verbose", "--max-turns", "1"],
+        capture_output=True, text=True, cwd=tempfile.gettempdir(), timeout=120,
+    ).stdout
+    for line in out.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        windows = (event.get("rate_limit_info") or {}).get("unifiedWindows")
+        if event.get("type") == "rate_limit_event" and windows:
+            return {
+                key: {"used_percentage": w["utilization"] * 100, "resets_at": w.get("resetsAt")}
+                for key, w in windows.items() if w.get("utilization") is not None
+            }
+    print("Probe returned no rate_limit_event.", file=sys.stderr)
+    sys.exit(1)
+
+
+def save(limits):
+    snapshot = {
+        "observed_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "five_hour": limits.get("five_hour"),
+        "seven_day": limits.get("seven_day"),
+    }
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", dir=CACHE_DIR, delete=False) as f:
+        json.dump(snapshot, f)
+        tmp = pathlib.Path(f.name)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, CACHE)
+    return snapshot
+
+
+def main(args):
+    if args in (["-h"], ["--help"]):
+        print(__doc__.strip())
+        return 0
+    if args == ["--probe"]:
+        report(save(probe()))
+        return 0
+    if args == ["--capture"]:
+        report(save(json.load(sys.stdin).get("rate_limits") or {}))
+        return 0
+    if not args:
+        if not CACHE.exists():
+            print("No snapshot yet. Configure the status line or run: cc-quota --probe")
+            return 1
+        report(json.loads(CACHE.read_text()))
+        return 0
+    print("Usage: cc-quota [--capture | --probe | --help]", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
